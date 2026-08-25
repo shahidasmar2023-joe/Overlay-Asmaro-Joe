@@ -13,3 +13,6 @@ dist/
 release/
 dist/
 node_modules/
+
+release/
+dist/

@@ -1,0 +1,7 @@
+{
+  "theme": "glassmorphic_asmaro",
+  "blurIntensity": "24px",
+  "borderGlow": "rgba(225, 29, 72, 0.4)",
+  "enable3DParticles": true,
+  "fpsCap": 60
+}

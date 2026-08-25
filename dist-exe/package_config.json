@@ -1,0 +1,11 @@
+{
+  "appId": "com.overlay.asmaro.desktop",
+  "productName": "Asmaro Overlay",
+  "win": {
+    "target": [
+      "portable",
+      "nsis"
+    ],
+    "icon": "public/favicon.ico"
+  }
+}
