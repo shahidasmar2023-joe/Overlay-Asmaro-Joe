@@ -1,0 +1,6 @@
+{
+  "name": "Overlay Asmaro - متجر ألعاب التخريب والتنبيهات",
+  "description": "منصة متجر ألعاب وتنبيهات البثوث مع نظام تفعيل الأكواد والتراخيص الزمنية، قسم تحميلات ورفع مباشر من الكمبيوتر، إدارة صلاحيات مستخدمي Gmail، وحماية كاملة ضد السرقة والتنزيل غير المصرح به",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
