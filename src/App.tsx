@@ -1,285 +1,273 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Search, Shield, Sparkles, Gamepad2, Radio, Code2, Layers,
-  Download, MessageCircle, ExternalLink, Key, Lock, CheckCircle2,
-  Flame, ChevronRight, HelpCircle, Film, Play, Volume2, ShieldCheck, ArrowRight, Sparkle
-} from 'lucide-react';
-import { StoreProduct, StoreSettings, SubscriptionLicense, StoreCategory } from './types';
-import {
-  getStoredCategories,
-  getStoredProducts,
-  getStoredSettings,
-  getStoredSubscriptions
-} from './utils/storage';
-import { exportUniversalStoreZip } from './utils/zipManager';
-import { ThreeScene } from './components/ThreeScene';
-import { Navbar } from './components/Navbar';
-import { ProductCard } from './components/ProductCard';
-import { ProductDetailModal } from './components/ProductDetailModal';
-import { SubscriptionCheckerModal } from './components/SubscriptionCheckerModal';
-import { AdminPanel } from './components/AdminPanel';
-import { VideoWithWatermark } from './components/VideoWithWatermark';
-import { GmailAuthModal } from './components/GmailAuthModal';
-import { OnlineGuard } from './components/OnlineGuard';
-import { InAppBrowserModal } from './components/InAppBrowserModal';
+import React, { useState, useEffect, useMemo } from 'react';
+import { StoreData, StoreItem } from './types';
+import { INITIAL_STORE_DATA } from './lib/defaultData';
+import { Header, renderDynamicIcon } from './components/Header';
+import { CategoryNav } from './components/CategoryNav';
+import { CategoryBanner } from './components/CategoryBanner';
+import { StoreGrid } from './components/StoreGrid';
+import { BuyModal } from './components/BuyModal';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { AdminModal } from './components/AdminModal';
+import { PasswordPromptModal } from './components/PasswordPromptModal';
+import { exportFullStoreZip } from './lib/exportUtils';
+import { openDatabase, getMediaBlob } from './lib/db';
+import { MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
+
+const LOCAL_STORAGE_KEY = 'OVERLAY_ASMARO_STORE_DATA_V5';
 
 export default function App() {
-  const [categories, setCategories] = useState<StoreCategory[]>([]);
-  const [products, setProducts] = useState<StoreProduct[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(getStoredSettings());
-  const [subscriptions, setSubscriptions] = useState<SubscriptionLicense[]>([]);
-
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState<StoreProduct | null>(null);
-  const [runningBrowserProduct, setRunningBrowserProduct] = useState<StoreProduct | null>(null);
-
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isSubCheckerOpen, setIsSubCheckerOpen] = useState(false);
-  const [isGmailAuthOpen, setIsGmailAuthOpen] = useState(false);
-  const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
-    return localStorage.getItem('asmaro_current_user_email') || '';
+  const [storeData, setStoreData] = useState<StoreData>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && Array.isArray(parsed.items) && parsed.config) {
+          return {
+            ...INITIAL_STORE_DATA,
+            ...parsed,
+            config: {
+              ...INITIAL_STORE_DATA.config,
+              ...parsed.config,
+              iconConfig: {
+                ...INITIAL_STORE_DATA.config.iconConfig,
+                ...(parsed.config.iconConfig || {}),
+              },
+            },
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage load error:', e);
+    }
+    return INITIAL_STORE_DATA;
   });
 
-  // Load data & subscribe to storage updates
-  const refreshData = () => {
-    setCategories(getStoredCategories());
-    setProducts(getStoredProducts());
-    setSettings(getStoredSettings());
-    setSubscriptions(getStoredSubscriptions());
-  };
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
+  const [activeBuyItem, setActiveBuyItem] = useState<StoreItem | null>(null);
+  const [activePreviewVideoItem, setActivePreviewVideoItem] = useState<StoreItem | null>(null);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isPasswordPromptOpen, setIsPasswordPromptOpen] = useState(false);
+
+  // Initialize DB and load any stored media blobs (e.g. custom store logo from IndexedDB)
   useEffect(() => {
-    refreshData();
-
-    const handleUpdate = () => refreshData();
-    window.addEventListener('asmaro_store_updated', handleUpdate);
-    return () => window.removeEventListener('asmaro_store_updated', handleUpdate);
+    openDatabase()
+      .then(async () => {
+        // Load custom store logo blob from IndexedDB if key exists
+        if (storeData.config.storeLogoKey) {
+          try {
+            const logoMedia = await getMediaBlob(storeData.config.storeLogoKey);
+            if (logoMedia) {
+              const url = URL.createObjectURL(logoMedia.blob);
+              setStoreData((prev) => ({
+                ...prev,
+                config: {
+                  ...prev.config,
+                  storeLogoUrl: url,
+                },
+              }));
+            }
+          } catch (err) {
+            console.warn('Could not load custom store logo from IndexedDB:', err);
+          }
+        }
+      })
+      .catch((err) => console.error('IndexedDB init error:', err));
   }, []);
 
-  // Filtered Products
-  const filteredProducts = products.filter((p) => {
-    const matchesCategory = activeCategory === 'all' || p.category === activeCategory;
-    const matchesSearch =
-      searchQuery.trim() === '' ||
-      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.shortDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+  const handleUpdateStoreData = (newData: StoreData) => {
+    setStoreData(newData);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newData));
+    } catch (err) {
+      console.warn('Failed to save to localStorage:', err);
+    }
+  };
 
-    return matchesCategory && matchesSearch;
-  });
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return storeData.items.filter((item) => {
+      const matchesCat = selectedCategoryId === 'all' || item.categoryId === selectedCategoryId;
+      if (!matchesCat) return false;
 
-  const activeCategoryObj = categories.find(c => c.id === activeCategory);
-
-  const handleQuickZipExport = async () => {
-    await exportUniversalStoreZip({
-      categories,
-      products,
-      settings,
-      subscriptions,
-      zipPassword: settings.zipProtectionPassword
+      if (!query) return true;
+      const titleMatch = item.title.toLowerCase().includes(query);
+      const descMatch = (item.description || '').toLowerCase().includes(query);
+      const tagsMatch = (item.tags || []).some((t) => t.toLowerCase().includes(query));
+      const priceMatch = (item.price || '').toLowerCase().includes(query);
+      return titleMatch || descMatch || tagsMatch || priceMatch;
     });
+  }, [storeData.items, selectedCategoryId, searchQuery]);
+
+  const itemsCountByCat = useMemo(() => {
+    const counts: Record<string, number> = {};
+    storeData.categories.forEach((cat) => {
+      counts[cat.id] = storeData.items.filter((i) => i.categoryId === cat.id).length;
+    });
+    return counts;
+  }, [storeData.categories, storeData.items]);
+
+  const totalGamesCount = useMemo(
+    () => storeData.items.filter((i) => i.type === 'game' || i.type === 'script').length,
+    [storeData.items]
+  );
+
+  const totalAlertsCount = useMemo(
+    () => storeData.items.filter((i) => i.type === 'video').length,
+    [storeData.items]
+  );
+
+  const currentCategory = useMemo(() => {
+    if (selectedCategoryId === 'all') return null;
+    return storeData.categories.find((c) => c.id === selectedCategoryId) || null;
+  }, [selectedCategoryId, storeData.categories]);
+
+  const handleTriggerDownloadZip = () => {
+    setIsPasswordPromptOpen(true);
   };
 
-  const handleDirectWhatsapp = () => {
-    const cleanNumber = settings.whatsappNumber.replace(/[^0-9]/g, '');
-    const msg = encodeURIComponent(`مرحباً Asmaro Overlay، أريد الاستفسار عن الألعاب والسكربتات.`);
-    window.open(`https://wa.me/${cleanNumber}?text=${msg}`, '_blank');
+  const handleExecuteZipExport = () => {
+    exportFullStoreZip(storeData);
   };
 
-  const handleGmailLoginSuccess = (email: string) => {
-    setCurrentUserEmail(email);
-    localStorage.setItem('asmaro_current_user_email', email);
-    refreshData();
-  };
+  const iconCfg = storeData.config.iconConfig;
 
   return (
-    <OnlineGuard requireOnline={settings.requireInternetConnection !== false}>
-      <div className="relative min-h-screen text-slate-100 flex flex-col selection:bg-rose-500 selection:text-white">
-        {/* 1. Interactive 3D Fluid Liquid Shader Background (Royal Red & Obsidian Black) */}
-        <ThreeScene />
+    <div className="min-h-screen bg-[#050505] text-[#f1f5f9] flex flex-col font-sans selection:bg-rose-500 selection:text-white relative overflow-hidden">
+      {/* Dynamic Background Glows */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div
+          className="absolute -top-40 -left-40 w-[35rem] h-[35rem] rounded-full blur-[140px] opacity-30 animate-pulse"
+          style={{ backgroundColor: iconCfg?.primaryColor || '#f43f5e' }}
+        />
+        <div
+          className="absolute top-1/3 -right-40 w-[40rem] h-[40rem] rounded-full blur-[160px] opacity-25 animate-pulse"
+          style={{ backgroundColor: iconCfg?.secondaryColor || '#3b82f6' }}
+        />
+        <div
+          className="absolute bottom-10 left-1/4 w-[30rem] h-[30rem] rounded-full blur-[130px] opacity-20"
+          style={{ backgroundColor: iconCfg?.glowColor || '#fbbf24' }}
+        />
+      </div>
 
-        {/* 2. Streamlined Navigation Bar with Dynamic Categories */}
-        <Navbar
-          categories={categories}
-          activeCategory={activeCategory}
-          onSelectCategory={setActiveCategory}
+      <div className="relative z-10 flex flex-col min-h-screen">
+        {/* Header with Store Picture Logo & Icon Color Customizer */}
+        <Header
+          config={storeData.config}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          totalGamesCount={totalGamesCount}
+          totalAlertsCount={totalAlertsCount}
           onOpenAdmin={() => setIsAdminOpen(true)}
-          onOpenGmailAuth={() => setIsGmailAuthOpen(true)}
-          onQuickZipExport={handleQuickZipExport}
-          settings={settings}
-          totalProductsCount={products.length}
-          currentUserEmail={currentUserEmail}
+          onDownloadZip={handleTriggerDownloadZip}
         />
 
-        {/* 3. Main Streamlined Content Area */}
-        <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full space-y-8">
-          
-          {/* Dynamic Categories Grid (High-Res Cover Images with High-Contrast Floating Titles) */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-                <span>أقسام وتصنيفات المتجر</span>
-              </h3>
-            </div>
-          </section>
+        {/* Category Navigation Bar */}
+        <CategoryNav
+          categories={storeData.categories}
+          selectedCategoryId={selectedCategoryId}
+          onSelectCategory={setSelectedCategoryId}
+          itemsCountByCat={itemsCountByCat}
+          totalItemsCount={storeData.items.length}
+        />
 
-          {/* Search Input Bar */}
-          <section className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-sm text-slate-300">
-              <span className="font-bold text-white">المنتجات المعروضة:</span>
-              <span className="px-2 py-0.5 rounded-md bg-rose-950/80 border border-rose-500/40 text-rose-300 font-mono font-bold text-xs">
-                {filteredProducts.length} عنصر
-              </span>
-            </div>
+        {/* Category Banner if a category is selected */}
+        <CategoryBanner category={currentCategory} itemsCount={filteredItems.length} />
 
-            <div className="relative w-full sm:w-80">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ابحث عن لعبة، سكربت، أو فيديو..."
-                className="w-full pl-4 pr-10 py-2 rounded-xl bg-slate-900/90 border border-white/15 text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:border-rose-500 transition-colors shadow-inner"
-              />
-              <Search className="absolute right-3 top-2.5 w-4 h-4 text-slate-400" />
-            </div>
-          </section>
-
-          {/* 3D Products Grid */}
-          <section>
-            {filteredProducts.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProducts.map((product) => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    settings={settings}
-                    currentUserEmail={currentUserEmail}
-                    onOpenDetails={setSelectedProduct}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="p-12 rounded-3xl bg-slate-950/80 text-center space-y-4 border border-white/10">
-                <Gamepad2 className="w-12 h-12 text-slate-500 mx-auto" />
-                <h4 className="text-lg font-bold text-white">لا توجد عناصر في هذا التصنيف</h4>
-                <button
-                  onClick={() => { setActiveCategory('all'); setSearchQuery(''); }}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors"
-                >
-                  عرض كافة المنتجات
-                </button>
-              </div>
-            )}
-          </section>
-
+        {/* Main Grid of Store Items */}
+        <main className="flex-1">
+          <StoreGrid
+            items={filteredItems}
+            categories={storeData.categories}
+            selectedCategoryId={selectedCategoryId}
+            searchQuery={searchQuery}
+            onOpenBuyModal={(item) => setActiveBuyItem(item)}
+            onPreviewVideoModal={(item) => setActivePreviewVideoItem(item)}
+          />
         </main>
 
-        {/* Footer */}
-        <footer className="w-full border-t border-white/10 bg-[#030407]/95 backdrop-blur-xl mt-16 py-6">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-rose-500" />
-              <span className="font-bold text-white font-mono">{settings.storeName}</span>
-              <span>- كافة الحقوق محفوظة © {new Date().getFullYear()}</span>
+        {/* Clean Luxury Footer */}
+        <footer className="bg-black/60 backdrop-blur-2xl border-t border-white/10 mt-16 py-8 px-4 sm:px-6 shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-right">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center p-1"
+                style={{
+                  background: `linear-gradient(135deg, ${iconCfg?.primaryColor || '#f43f5e'} 0%, ${iconCfg?.secondaryColor || '#3b82f6'} 100%)`,
+                }}
+              >
+                <div
+                  className="w-full h-full rounded-[14px] flex items-center justify-center"
+                  style={{ background: iconCfg?.bgGradientFrom || '#0c1017' }}
+                >
+                  {renderDynamicIcon(iconCfg?.iconName || 'Sparkles', 'w-5 h-5', {
+                    color: iconCfg?.primaryColor || '#f43f5e',
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-base font-black text-white">
+                  {storeData.config.storeName || 'Overlay Store'}
+                </div>
+                <p className="text-xs text-slate-400">
+                  {storeData.config.storeSubtitle || 'منصة الألعاب والبث التفاعلي'}
+                </p>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
-              <button
-                onClick={() => setIsSubCheckerOpen(true)}
-                className="hover:text-cyan-400 transition-colors flex items-center gap-1"
-              >
-                <Key className="w-3.5 h-3.5 text-cyan-400" />
-                <span>فحص ترخيص واشتراك</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  const url = settings.tiktokUrl || (settings.tiktokUsername ? `https://tiktok.com/@${settings.tiktokUsername.replace('@', '')}` : 'https://tiktok.com');
-                  window.open(url, '_blank');
-                }}
-                className="hover:text-rose-400 transition-colors flex items-center gap-1"
-              >
-                <svg className="w-3.5 h-3.5 fill-current text-rose-400" viewBox="0 0 24 24">
-                  <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 3 15.69a6.34 6.34 0 0 0 10.86 4.43 6.32 6.32 0 0 0 1.91-4.47V9.22a8.16 8.16 0 0 0 4.82 1.58v-3.5a4.85 4.85 0 0 1-1-.61z" />
-                </svg>
-                <span>تيك توك</span>
-              </button>
+            <div className="flex items-center gap-4 text-xs font-bold text-slate-300 flex-wrap justify-center">
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-amber-300">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>كود الأدمن: {storeData.config.adminPasswordHash || '2255'}</span>
+              </span>
 
               <a
-                href={settings.wishMoneyUrl || 'https://wishmoney.com'}
+                href={`https://wa.me/${storeData.config.whatsappNumber.replace(/[^0-9]/g, '')}`}
                 target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-amber-400 transition-colors flex items-center gap-1"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/70 transition-colors"
               >
-                <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
-                <span>Wish Money</span>
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>دعم الواتساب: {storeData.config.whatsappNumber}</span>
               </a>
+            </div>
 
-              <button
-                onClick={handleDirectWhatsapp}
-                className="hover:text-emerald-400 transition-colors flex items-center gap-1"
-              >
-                <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                <span>واتساب: {settings.whatsappNumber || '76774306'}</span>
-              </button>
+            <div className="text-xs text-slate-500 flex items-center gap-1 font-mono">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>© {new Date().getFullYear()} {storeData.config.storeName}</span>
             </div>
           </div>
         </footer>
-
-        {/* Product Details Modal */}
-        {selectedProduct && (
-          <ProductDetailModal
-            product={selectedProduct}
-            settings={settings}
-            currentUserEmail={currentUserEmail}
-            onClose={() => setSelectedProduct(null)}
-            onOpenInAppBrowser={(p) => setRunningBrowserProduct(p)}
-          />
-        )}
-
-        {/* In-App Browser Modal (For Games, HTML5 & Script Simulators) */}
-        {runningBrowserProduct && (
-          <InAppBrowserModal
-            product={runningBrowserProduct}
-            onClose={() => setRunningBrowserProduct(null)}
-          />
-        )}
-
-        {/* Subscription Checker Modal */}
-        {isSubCheckerOpen && (
-          <SubscriptionCheckerModal
-            subscriptions={subscriptions}
-            products={products}
-            settings={settings}
-            onClose={() => setIsSubCheckerOpen(false)}
-            onSelectProduct={(p) => setSelectedProduct(p)}
-          />
-        )}
-
-        {/* Admin Panel Modal */}
-        {isAdminOpen && (
-          <AdminPanel
-            categories={categories}
-            products={products}
-            settings={settings}
-            subscriptions={subscriptions}
-            onClose={() => setIsAdminOpen(false)}
-            onRefreshData={refreshData}
-          />
-        )}
-
-        {/* Gmail Google Login Modal */}
-        {isGmailAuthOpen && (
-          <GmailAuthModal
-            settings={settings}
-            currentEmail={currentUserEmail}
-            onClose={() => setIsGmailAuthOpen(false)}
-            onSuccess={handleGmailLoginSuccess}
-          />
-        )}
       </div>
-    </OnlineGuard>
+
+      {/* Modals */}
+      <BuyModal
+        item={activeBuyItem}
+        config={storeData.config}
+        onClose={() => setActiveBuyItem(null)}
+      />
+
+      <VideoPlayerModal
+        item={activePreviewVideoItem}
+        onClose={() => setActivePreviewVideoItem(null)}
+        onOpenBuyModal={(item) => setActiveBuyItem(item)}
+      />
+
+      <AdminModal
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        storeData={storeData}
+        onUpdateStoreData={handleUpdateStoreData}
+      />
+
+      <PasswordPromptModal
+        isOpen={isPasswordPromptOpen}
+        correctPassword={storeData.config.adminPasswordHash || '2255'}
+        onClose={() => setIsPasswordPromptOpen(false)}
+        onSuccess={handleExecuteZipExport}
+      />
+    </div>
   );
 }

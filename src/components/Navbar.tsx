@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import {
-  Shield, Sparkles, Download, Settings as SettingsIcon, MessageCircle,
-  Gamepad2, Radio, Code2, Layers, Film, ArrowDownToLine, ChevronLeft, ChevronRight,
-  Mail, UserCheck
+  Shield, Sparkles, Settings as SettingsIcon, MessageCircle,
+  ArrowDownToLine, Mail, UserCheck
 } from 'lucide-react';
 import { StoreCategory, StoreSettings } from '../types';
 
@@ -31,12 +30,30 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
 
   const handleDirectWhatsapp = () => {
-    const cleanNumber = settings.whatsappNumber.replace(/[^0-9]/g, '');
-    const msg = encodeURIComponent(`مرحباً Asmaro Overlay، أريد الاستفسار عن الألعاب والسكربتات المتاحة.`);
+    const cleanNumber = settings.whatsappNumber ? settings.whatsappNumber.replace(/[^0-9]/g, '') : '76774306';
+    const msg = encodeURIComponent(`مرحباً ${settings.storeName || 'Asmaro Overlay'}، أريد الاستفسار عن الألعاب والسكربتات المتاحة.`);
     window.open(`https://wa.me/${cleanNumber}?text=${msg}`, '_blank');
   };
 
   const avatarUrl = settings.storeLogoAvatarUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200&auto=format&fit=crop&q=80';
+
+  // دالة لتنفيذ تلوين كل حرف على حدة إذا تم تفعيل ميزة الألوان المخصصة للأحرف
+  const renderCustomColoredTitle = (text: string, customColors?: string[]) => {
+    if (!text) return null;
+    const letters = Array.from(text);
+    return letters.map((char, idx) => {
+      const color = (customColors && customColors[idx]) ? customColors[idx] : undefined;
+      return (
+        <span
+          key={idx}
+          style={color ? { color } : undefined}
+          className={!color ? "text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-200 to-slate-200" : ""}
+        >
+          {char}
+        </span>
+      );
+    });
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-[#04060a]/95 backdrop-blur-2xl transition-all shadow-2xl shadow-black/80">
@@ -113,7 +130,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
         <div className="flex items-center justify-between gap-4">
           
-          {/* Logo & Asmaro Overlay Custom Typographic Brand with Flaming Circular Avatar */}
+          {/* Logo & Custom Typographic Brand with Flaming Circular Avatar */}
           <div
             className="flex items-center gap-3.5 cursor-pointer group select-none"
             onClick={() => onSelectCategory('all')}
@@ -123,7 +140,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="w-full h-full rounded-full overflow-hidden bg-black border border-white/20">
                 <img
                   src={avatarUrl}
-                  alt="Asmaro Overlay"
+                  alt={settings.storeName || "Asmaro Overlay"}
                   className="w-full h-full object-cover group-hover:rotate-6 transition-transform duration-500"
                 />
               </div>
@@ -133,14 +150,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </div>
 
-            {/* Custom Styled Title: Overlay Asmaro */}
+            {/* Custom Styled Dynamic Title */}
             <div className="flex flex-col">
               <div className="flex items-baseline gap-2">
-                <span className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-rose-500 via-amber-400 to-amber-200 drop-shadow-[0_0_15px_rgba(244,63,94,0.5)]">
-                  Overlay
+                {/* Prefix Part / Title 1 */}
+                <span
+                  style={settings.titlePrefixColor ? { color: settings.titlePrefixColor } : undefined}
+                  className={`text-xl sm:text-2xl md:text-3xl font-black tracking-tight drop-shadow-[0_0_15px_rgba(244,63,94,0.5)] ${
+                    !settings.titlePrefixColor ? "text-transparent bg-clip-text bg-gradient-to-r from-rose-500 via-amber-400 to-amber-200" : ""
+                  }`}
+                >
+                  {settings.storeTitlePrefix || 'Overlay'}
                 </span>
-                <span className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-200 to-slate-200 drop-shadow-[0_0_15px_rgba(245,158,11,0.5)] font-mono">
-                  أسماره
+
+                {/* Main Part / Title 2 with per-letter coloring support */}
+                <span className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight drop-shadow-[0_0_15px_rgba(245,158,11,0.5)] font-mono">
+                  {renderCustomColoredTitle(
+                    settings.storeName || 'أسماره',
+                    settings.titleLetterColors
+                  )}
                 </span>
               </div>
             </div>
@@ -149,7 +177,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Action Tools: Discrete Zip & Admin (إدارة) */}
           <div className="flex items-center gap-2 sm:gap-3">
             
-            {/* Subtle Zip Export Button (Discrete & Unobtrusive) */}
+            {/* Subtle Zip Export Button */}
             <button
               onClick={onQuickZipExport}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-900/60 hover:bg-slate-800 border border-white/10 transition-all active:scale-95 shadow-sm"
@@ -159,7 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-mono">Zip</span>
             </button>
 
-            {/* Clean Admin Gear Button with Arabic Label (إدارة) */}
+            {/* Clean Admin Gear Button */}
             <button
               onClick={onOpenAdmin}
               className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-200 hover:text-white bg-slate-900/90 hover:bg-rose-950/80 border border-white/15 hover:border-rose-500/50 transition-all duration-300 active:scale-95 shadow-md shadow-black/40"
@@ -233,4 +261,3 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
-
